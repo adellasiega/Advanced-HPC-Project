@@ -117,20 +117,103 @@ int main(int argc, char *argv[]) {
         std::cerr << argv[0] << " nx ny n_iterations\n";
         return 1;
     }
-
+    
     size_t nx = std::stoul(argv[1]);
     size_t ny = std::stoul(argv[2]);
     size_t n_iterations = std::stoul(argv[3]);
 
-    Matrix<double> M = alloc_init_matrix(nx, ny);
-    Matrix<double> M_new(nx, ny, 0.0);
-
-    for (size_t t = 0; t < n_iterations ; ++t) {
-        jacobi_step(M, M_new);
-        std::swap(M, M_new);
+    MPI_Init(&argc, &argv);
+    
+    int rank, size;
+    
+    MPI_Comm_rank(MPI_COMM_WORLD, &rank);
+    MPI_Comm_size(MPI_COMM_WORLD, &size);
+    
+    // local_nx is the number of rows assigned to each process
+    // distribute reminder rows
+    size_t local_nx = nx / size;
+    size_t remainder = nx % size;
+    local_nx += (rank < remainder ? 1 : 0)
+    
+    // Add boundary rows
+    if (rank == 0 || rank == size-1) {
+        local_nx += 1;
+    } else {
+        local_nx += 2;
     }
 
-    heatmap(M_new);
+    // SubMatrixes
+    Matrix<double> M, M_new;
+
+    M = Matrix<double>(local_nx, ny);
+    M_new = Matrix<double>(local_nx, ny);
+
+    // Full Matrix
+    Matrix<double> M_full;
     
-    return 0;
+    // Scatter info
+    std::vector<size_t> sendcounts, displs;
+    if (rank == 0) {
+        M_full = alloc_init_matrix(nx, ny);
+
+        sendcounts.resize(size);
+        displs.resize(size);
+
+        int offset = 0;
+        for (int r=0; r<size; ++r) {
+            size_t rows = r < nx%size ? nx/size + 1 : nx/size;
+            sendcounts[r] = rows * ny;
+            displs[r] = offset;
+            offset += sendcounts[r];
+        }
+    }
+
+    MPI_Scatterv(
+            rank == 0 ? M_full.raw() : nullptr, sendcounts.data(), displs.data(), MPI_DOUBLE,
+            rank == 0 || rank == size-1 ? M.raw() : M.raw()+ny, local_nx*ny, MPI_DOUBLE, 0,
+            MPI_COMM_WORLD
+    );
+
+    // Define process north and process south
+    int proc_north = rank - 1 >= 0    ?  rank - 1 : MPI_PROC_NULL;
+    int proc_south = rank + 1 <  size ?  rank + 1 : MPI_PROC_NULL;      
+    
+    // Send to north, receive from south
+    MPI_Sendrecv(
+        // Send first non-boundary row to process north
+        M.raw() + ny,                   ny, MPI_DOUBLE, proc_north, 0,
+        // Receive from process south the row to place in south boundary
+        M.raw() + (local_nx + 1) * ny,  ny, MPI_DOUBLE, proc_south, 0,
+           
+        MPI_COMM_WORLD, MPI_STATUS_IGNORE
+    );
+    
+    // Send to south, receive from north
+    MPI_Sendrecv(
+        // Send last non-boundary row to process south
+        M.raw() + local_nx * ny,        ny, MPI_DOUBLE, proc_south, 1,
+        // Receive from process north the row to place in north boundary
+        M.row(),                        ny, MPI_DOUBLE, proc_north, 1,
+
+        MPI_COMM_WORLD, MPI_STATUS_IGNORE
+    );
+   
+    // Jacobi iteration, skip boundary rows and columns
+    for (size_t i = 1; i < local_nx; ++i) {
+        for (size_t j = 1; j < ny; ++j) {
+            M_new(i,j) = ( M(i-1,j) + M(i,j+1) + M(i+1,j) + M(i,j-1) )/4;
+        }
+    }
+
+
+
+    // Collect data on root process
+    MPI_Gatherv(
+            const void *sendbuf, int sendcount, MPI_Datatype sendtype,
+            void *recvbuf, const int recvcounts[], const int displs[], MPI_Datatype recvtype,
+            int root, MPI_Comm comm
+    );
+
+
+    return 0; 
 }
