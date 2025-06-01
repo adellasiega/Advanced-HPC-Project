@@ -6,7 +6,7 @@
 #include <vector>
 #include <cmath>
 #include <string>
-#include <mpi>
+#include <mpi.h>
 
 template <typename T>
 class Matrix {
@@ -67,14 +67,6 @@ Matrix<double> alloc_init_matrix(size_t nx, size_t ny) {
     return M;
 }
 
-void jacobi_step(Matrix<double> &M, Matrix<double> &M_new) {
-    for (size_t i = 1; i < M.rows()-1; ++i) {
-        for (size_t j = 1; j < M.cols()-1; ++j) {
-            M_new(i,j) = ( M(i-1,j) + M(i,j+1) + M(i+1,j) + M(i,j-1) )/4;
-        }
-    }
-}
-
 void heatmap(Matrix<double> M) {
     // Image dimensions
     size_t height = M.rows();
@@ -131,37 +123,35 @@ int main(int argc, char *argv[]) {
     
     // local_nx is the number of rows assigned to each process
     // distribute reminder rows
-    size_t local_nx = nx / size;
+    size_t local_nx;
+    size_t local_nx_no_bound = nx / size;
     size_t remainder = nx % size;
-    local_nx += (rank < remainder ? 1 : 0)
-    
+    local_nx_no_bound += (rank < remainder ? 1 : 0);
     // Add boundary rows
-    if (rank == 0 || rank == size-1) {
-        local_nx += 1;
+    if (size == 1) {
+        local_nx = local_nx_no_bound;
+    } else if (rank == 0 || rank == size-1) {
+        local_nx = local_nx_no_bound + 1;
     } else {
-        local_nx += 2;
+        local_nx = local_nx_no_bound + 2;
     }
 
     // SubMatrixes
-    Matrix<double> M, M_new;
-
-    M = Matrix<double>(local_nx, ny);
-    M_new = Matrix<double>(local_nx, ny);
+    Matrix<double> M = Matrix<double>(local_nx, ny);
+    Matrix<double> M_new = Matrix<double>(local_nx, ny);
 
     // Full Matrix
-    Matrix<double> M_full;
+    Matrix<double> M_full = Matrix<double>(nx, ny);
     
-    // Scatter info
-    std::vector<size_t> sendcounts, displs;
+    // Scatter info 
+    std::vector<int> sendcounts, displs;
     if (rank == 0) {
         M_full = alloc_init_matrix(nx, ny);
-
         sendcounts.resize(size);
         displs.resize(size);
-
         int offset = 0;
-        for (int r=0; r<size; ++r) {
-            size_t rows = r < nx%size ? nx/size + 1 : nx/size;
+        for (int r = 0; r < size; ++r) {
+            int rows = r < nx%size ? nx/size + 1 : nx/size;
             sendcounts[r] = rows * ny;
             displs[r] = offset;
             offset += sendcounts[r];
@@ -170,50 +160,71 @@ int main(int argc, char *argv[]) {
 
     MPI_Scatterv(
             rank == 0 ? M_full.raw() : nullptr, sendcounts.data(), displs.data(), MPI_DOUBLE,
-            rank == 0 || rank == size-1 ? M.raw() : M.raw()+ny, local_nx*ny, MPI_DOUBLE, 0,
+            rank == 0 ? M.raw() : M.raw()+ny, local_nx*ny, MPI_DOUBLE, 0,
             MPI_COMM_WORLD
     );
 
     // Define process north and process south
     int proc_north = rank - 1 >= 0    ?  rank - 1 : MPI_PROC_NULL;
-    int proc_south = rank + 1 <  size ?  rank + 1 : MPI_PROC_NULL;      
-    
-    // Send to north, receive from south
-    MPI_Sendrecv(
-        // Send first non-boundary row to process north
-        M.raw() + ny,                   ny, MPI_DOUBLE, proc_north, 0,
-        // Receive from process south the row to place in south boundary
-        M.raw() + (local_nx + 1) * ny,  ny, MPI_DOUBLE, proc_south, 0,
-           
-        MPI_COMM_WORLD, MPI_STATUS_IGNORE
-    );
-    
-    // Send to south, receive from north
-    MPI_Sendrecv(
-        // Send last non-boundary row to process south
-        M.raw() + local_nx * ny,        ny, MPI_DOUBLE, proc_south, 1,
-        // Receive from process north the row to place in north boundary
-        M.row(),                        ny, MPI_DOUBLE, proc_north, 1,
+    int proc_south = rank + 1 <  size ?  rank + 1 : MPI_PROC_NULL;
 
-        MPI_COMM_WORLD, MPI_STATUS_IGNORE
-    );
-   
-    // Jacobi iteration, skip boundary rows and columns
-    for (size_t i = 1; i < local_nx; ++i) {
-        for (size_t j = 1; j < ny; ++j) {
-            M_new(i,j) = ( M(i-1,j) + M(i,j+1) + M(i+1,j) + M(i,j-1) )/4;
+    // Jacobi iterative algorithm
+    for (size_t iteration = 0; iteration < n_iterations; ++iteration) {
+        
+        // Communicate boundary elements between processors
+        // Send to north, receive from south
+        MPI_Sendrecv(
+            // Send first non-boundary row to process north
+            M.raw() + ny,                   ny, MPI_DOUBLE, proc_north, 0,
+            // Receive from process south the row to place in south boundary
+            M.raw() + (local_nx - 1) * ny,  ny, MPI_DOUBLE, proc_south, 0,
+            MPI_COMM_WORLD, MPI_STATUS_IGNORE
+        );
+
+        // Send to south, receive from north
+        MPI_Sendrecv(
+            // Send last non-boundary row to process south
+            M.raw() + (local_nx - 2) * ny,  ny, MPI_DOUBLE, proc_south, 1,
+            // Receive from process north the row to place in north boundary
+            M.raw(),                        ny, MPI_DOUBLE, proc_north, 1,
+            MPI_COMM_WORLD, MPI_STATUS_IGNORE
+        );
+
+        // Jacobi iteration, skip boundary rows and columns
+        for (size_t i = 1; i < local_nx - 1; ++i) {
+            for (size_t j = 1; j < ny - 1; ++j) {
+                M_new(i,j) = ( M(i-1,j) + M(i,j+1) + M(i+1,j) + M(i,j-1) )/4;
+            }
         }
+        
+        // Boundary rows/cols remain unchanged
+        for (size_t j = 0; j < ny; ++j) {
+            M_new(0, j) = M(0, j);  // Top boundary row
+            M_new(local_nx - 1, j) = M(local_nx - 1, j);  // Bottom boundary row
+        }
+        
+        for (size_t i = 0; i < local_nx; ++i) {
+            M_new(i, 0) = M(i, 0); //Left boundary column  
+            M_new(i, ny - 1) = M(i, ny - 1); // Right boundary column
+        }
+        
+        // In the next step, M is M_new
+        std::swap(M, M_new);
     }
 
-
-
-    // Collect data on root process
+    // Collect submatrixes in full matrixes
     MPI_Gatherv(
-            const void *sendbuf, int sendcount, MPI_Datatype sendtype,
-            void *recvbuf, const int recvcounts[], const int displs[], MPI_Datatype recvtype,
-            int root, MPI_Comm comm
+        rank == 0 ? M.raw() : M.raw() + ny , local_nx_no_bound * ny, MPI_DOUBLE,
+        M_full.raw(), sendcounts.data(), displs.data(), MPI_DOUBLE,
+        0, MPI_COMM_WORLD
     );
+    
+    // Save heatmap of the results
+    if (rank == 0) {
+        heatmap(M_full);
+    }
 
-
+    MPI_Finalize();
+    
     return 0; 
 }
