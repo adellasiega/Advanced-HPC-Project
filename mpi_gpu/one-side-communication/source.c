@@ -1,63 +1,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
-#include <math.h>
 #include <mpi.h>
 #include <omp.h>
-
-double* alloc_init_matrix(size_t nx, size_t ny) {
-    double* M = (double*)malloc(nx * ny * sizeof(double));
-    double v_max = 100.0;
-    double v_inner = 0.5;
-
-    // Initialize all to inner value
-    for (size_t i = 0; i < nx; ++i)
-        for (size_t j = 0; j < ny; ++j)
-            M[i * ny + j] = v_inner;
-
-    // Set boundary conditions
-    for (size_t i = 0; i < nx; ++i) {
-        for (size_t j = 0; j < ny; ++j) {
-            if (i == nx - 1) {
-                double q = (double)j / (ny - 1);
-                M[i * ny + j] = v_max * (1.0 - q);
-            } else if (j == 0) {
-                double q = (double)i / (nx - 1);
-                M[(nx - i - 1) * ny + j] = v_max * (1.0 - q);
-            } else if (i == 0 || j == ny - 1) {
-                M[i * ny + j] = 0.0;
-            }
-        }
-    }
-
-    return M;
-}
-
-void heatmap(double* M, size_t nx, size_t ny) {
-    double v_max = 0.0;
-    for (size_t i = 1; i < nx; ++i)
-        for (size_t j = 1; j < ny; ++j)
-            if (M[i * ny + j] > v_max)
-                v_max = M[i * ny + j];
-
-    FILE* out = fopen("heatmap.ppm", "wb");
-    fprintf(out, "P6\n%zu %zu\n255\n", ny - 2, nx - 2);
-
-    for (size_t i = 1; i < nx - 1; ++i) {
-        for (size_t j = 1; j < ny - 1; ++j) {
-            double v = M[i * ny + j] / v_max;
-            uint8_t r = (uint8_t)(v * 255);
-            uint8_t g = (uint8_t)((1 - fabs(v - 0.5) * 2) * 255);
-            uint8_t b = (uint8_t)(255 - v * 255);
-            fputc(r, out);
-            fputc(g, out);
-            fputc(b, out);
-        }
-    }
-
-    fclose(out);
-    printf("Heatmap saved to heatmap.ppm\n");
-}
+#include "../utils.h"
 
 int main(int argc, char* argv[]) {
     if (argc != 4) {
@@ -91,10 +37,11 @@ int main(int argc, char* argv[]) {
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
     /// Get the number of omp threads
+    int num_threads;
     #pragma omp parallel
     {
         #pragma omp single
-        printf("Running with %d threads on rank %d\n", omp_get_num_threads(), rank);
+        num_threads = omp_get_num_threads();
     }
 
     /// Start total time
@@ -148,6 +95,25 @@ int main(int argc, char* argv[]) {
     /// to comunicate boundary rows of the submatrixes
     int proc_north = (rank - 1 >= 0) ? rank - 1 : MPI_PROC_NULL;
     int proc_south = (rank + 1 < size) ? rank + 1 : MPI_PROC_NULL;
+
+    MPI_Win win_north;
+    MPI_Win win_south;
+
+    MPI_Win_create(
+            M + ny,
+            ny * sizeof(double),
+            sizeof(double),
+            MPI_INFO_NULL,
+            MPI_COMM_WORLD,
+            &win_north);
+    
+    MPI_Win_create(
+            M + (local_nx - 2) * ny, 
+            ny * sizeof(double),
+            sizeof(double),
+            MPI_INFO_NULL, 
+            MPI_COMM_WORLD, 
+            &win_south);
     
     /// Stop initialization time
     MPI_Barrier(MPI_COMM_WORLD); 
@@ -160,15 +126,25 @@ int main(int argc, char* argv[]) {
         /// Start Communication Time
         comm_start = MPI_Wtime();
         
-        /// Send and receive boundary rows
-        MPI_Sendrecv(M + ny, ny, MPI_DOUBLE, proc_north, 0,
-                     M + (local_nx - 1) * ny, ny, MPI_DOUBLE, proc_south, 0,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+        ///
+        MPI_Win_fence(0, win_north);
+        MPI_Win_fence(0, win_south);
 
-        MPI_Sendrecv(M + (local_nx - 2) * ny, ny, MPI_DOUBLE, proc_south, 1,
-                     M, ny, MPI_DOUBLE, proc_north, 1,
-                     MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-        
+        MPI_Get(
+                M + (local_nx - 1) * ny, ny, MPI_DOUBLE, 
+                proc_south, 0, ny, MPI_DOUBLE, 
+                win_north
+        );
+
+         MPI_Get(
+                M, ny, MPI_DOUBLE, 
+                proc_north, 0, ny, MPI_DOUBLE, 
+                win_south
+        );
+
+        MPI_Win_fence(0, win_north);
+        MPI_Win_fence(0, win_south);
+
         /// Partial communication time
         comm_end = MPI_Wtime();
         comm_time += comm_end - comm_start;
@@ -180,8 +156,11 @@ int main(int argc, char* argv[]) {
         #pragma omp parallel for collapse(2)
         for (size_t i = 1; i < local_nx - 1; ++i) {
             for (size_t j = 1; j < ny - 1; ++j) {
-                M_new[i * ny + j] = 0.25 * (M[(i - 1) * ny + j] + M[i * ny + j + 1] +
-                                           M[(i + 1) * ny + j] + M[i * ny + j - 1]);
+                M_new[i * ny + j] = 
+                    0.25 * (M[(i - 1) * ny + j] +
+                            M[i * ny + j + 1] + 
+                            M[(i + 1) * ny + j] + 
+                            M[i * ny + j - 1]);
             }
         }
         
@@ -217,14 +196,17 @@ int main(int argc, char* argv[]) {
     comm_end = MPI_Wtime();
     comm_time += comm_end - comm_start;
 
-
     MPI_Barrier(MPI_COMM_WORLD);
     total_end = MPI_Wtime();
     double total_time = total_end - total_start;
     
     if (rank == 0) {
-        heatmap(M_full, nx, ny);
+        write_heatmap(M_full, nx, ny);
+        write_results(nx, ny, n_iterations, size, num_threads, total_time, init_time, comm_time, comp_time);
     }
+    
+    MPI_Win_free(&win_north);
+    MPI_Win_free(&win_south);
     
     free(M);
     free(M_new);
@@ -233,13 +215,6 @@ int main(int argc, char* argv[]) {
         free(sendcounts);
         free(displs);
     }
-    
-    if (rank == 0) {
-        printf("Total time elapsed: %.6f s\n", total_time);
-        printf("Total initialization time: %.6f s\n", init_time);
-        printf("Total communication time: %.6f s\n", comm_time );
-        printf("Total computing time: %.6f s\n", comp_time);
-    };
     
     MPI_Finalize();
     return 0;
