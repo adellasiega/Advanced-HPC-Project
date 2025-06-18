@@ -102,7 +102,7 @@ int main(int argc, char* argv[]) {
     init_end = MPI_Wtime();
     double init_time = init_end - init_start;
 
-    total_size = local_nx * ny
+    int total_size = local_nx * ny;
     #pragma omp target data map(tofrom: M[0:total_size]) map(to:M_new[0:total_size]) 
     {    
     /// Jacobi algorithm

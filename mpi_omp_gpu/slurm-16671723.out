@@ -1,0 +1,10 @@
+Loading openmpi/4.1.6--nvhpc--24.3
+  Loading requirement: hpcx/2.18.1--binary
+cpu-bind=MASK - lrdn3161, task  0  0 [2705760]: mask 0xff set
+cpu-bind=MASK - lrdn3167, task  4  0 [392685]: mask 0xff set
+cpu-bind=MASK - lrdn3161, task  1  1 [2705761]: mask 0xff00 set
+cpu-bind=MASK - lrdn3167, task  5  1 [392686]: mask 0xff00 set
+cpu-bind=MASK - lrdn3161, task  2  2 [2705762]: mask 0xff0000 set
+cpu-bind=MASK - lrdn3167, task  6  2 [392687]: mask 0xff0000 set
+cpu-bind=MASK - lrdn3161, task  3  3 [2705763]: mask 0xff000000 set
+cpu-bind=MASK - lrdn3167, task  7  3 [392688]: mask 0xff000000 set
