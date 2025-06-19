@@ -4,6 +4,7 @@
 #include <mpi.h>
 #include <omp.h>
 #include "../utils.h"
+#include <unistd.h>   // for getcwd()
 
 int main(int argc, char* argv[]) {
     if (argc != 4) {
@@ -72,7 +73,6 @@ int main(int argc, char* argv[]) {
     /// Scatterv info
     int* sendcounts = NULL;
     int* displs = NULL;
-
     if (rank == 0) {
         M_full = alloc_init_matrix(nx, ny);
         sendcounts = malloc(size * sizeof(int));
@@ -92,96 +92,105 @@ int main(int argc, char* argv[]) {
                  0, MPI_COMM_WORLD);
     
     /// Define north and south process w.r.t. current process 
-    /// to comunicate boundary rows of the submatrixes
+    /// to comunicate submatrixes' boundary rows
     int proc_north = (rank - 1 >= 0) ? rank - 1 : MPI_PROC_NULL;
     int proc_south = (rank + 1 < size) ? rank + 1 : MPI_PROC_NULL;
 
-    MPI_Win win_north;
-    MPI_Win win_south;
-
-    MPI_Win_create(
-            M + ny,
-            ny * sizeof(double),
-            sizeof(double),
-            MPI_INFO_NULL,
-            MPI_COMM_WORLD,
-            &win_north);
-    
-    MPI_Win_create(
-            M + (local_nx - 2) * ny, 
-            ny * sizeof(double),
-            sizeof(double),
-            MPI_INFO_NULL, 
-            MPI_COMM_WORLD, 
-            &win_south);
-    
     /// Stop initialization time
     MPI_Barrier(MPI_COMM_WORLD); 
     init_end = MPI_Wtime();
     double init_time = init_end - init_start;
+    int total_size=local_nx*ny;
+    
+    MPI_Win win_north;
+    MPI_Win win_south;
+    #pragma omp target data map(tofrom: M[0:total_size]) map(to: M_new[0:total_size])
+    {
+	    #pragma omp target data use_device_ptr(M)
+	    {
+		    MPI_Win_create(
+			    M + ny,
+			    ny * sizeof(double),
+			    sizeof(double),
+			    MPI_INFO_NULL,
+			    MPI_COMM_WORLD,
+			    &win_north);
+		    
+		    MPI_Win_create(
+			    M + (local_nx - 2) * ny, 
+			    ny * sizeof(double),
+			    sizeof(double),
+			    MPI_INFO_NULL, 
+			    MPI_COMM_WORLD, 
+			    &win_south);
+	    } 
+	    
+	    /// Jacobi algorithm
+	    for (size_t iteration = 0; iteration < n_iterations; ++iteration) {
+		
+		/// Start Communication Time
+		comm_start = MPI_Wtime();
+		
+		#pragma omp target data use_device_ptr(M)
+		{
+			MPI_Win_fence(0, win_north);
+			MPI_Win_fence(0, win_south);
 
-    /// Jacobi algorithm
-    for (size_t iteration = 0; iteration < n_iterations; ++iteration) {
-        
-        /// Start Communication Time
-        comm_start = MPI_Wtime();
-        
-        ///
-        MPI_Win_fence(0, win_north);
-        MPI_Win_fence(0, win_south);
+			MPI_Get(
+				M + (local_nx - 1) * ny, ny, MPI_DOUBLE, 
+				proc_south, 0, ny, MPI_DOUBLE, 
+				win_north
+			);
 
-        MPI_Get(
-                M + (local_nx - 1) * ny, ny, MPI_DOUBLE, 
-                proc_south, 0, ny, MPI_DOUBLE, 
-                win_north
-        );
+			 MPI_Get(
+				M, ny, MPI_DOUBLE, 
+				proc_north, 0, ny, MPI_DOUBLE, 
+				win_south
+			);
 
-         MPI_Get(
-                M, ny, MPI_DOUBLE, 
-                proc_north, 0, ny, MPI_DOUBLE, 
-                win_south
-        );
+			MPI_Win_fence(0, win_north);
+			MPI_Win_fence(0, win_south);
+		}
 
-        MPI_Win_fence(0, win_north);
-        MPI_Win_fence(0, win_south);
+		/// Partial communication time
+		comm_end = MPI_Wtime();
+		comm_time += comm_end - comm_start;
+		
+		/// Computation time
+		comp_start = MPI_Wtime();
 
-        /// Partial communication time
-        comm_end = MPI_Wtime();
-        comm_time += comm_end - comm_start;
-        
-        /// Computation time
-        comp_start = MPI_Wtime();
+		/// Jacobi iteration
+		
+		#pragma omp target teams distribute parallel for simd collapse(2) num_teams(108)  
+		for (size_t i = 1; i < local_nx - 1; ++i) {
+		    for (size_t j = 1; j < ny - 1; ++j) {
+			M_new[i * ny + j] = 
+			    0.25 * (M[(i - 1) * ny + j] +
+				    M[i * ny + j + 1] + 
+				    M[(i + 1) * ny + j] + 
+				    M[i * ny + j - 1]);
+		    }
+		}
 
-        /// Jacobi iteration
-        #pragma omp parallel for collapse(2)
-        for (size_t i = 1; i < local_nx - 1; ++i) {
-            for (size_t j = 1; j < ny - 1; ++j) {
-                M_new[i * ny + j] = 
-                    0.25 * (M[(i - 1) * ny + j] +
-                            M[i * ny + j + 1] + 
-                            M[(i + 1) * ny + j] + 
-                            M[i * ny + j - 1]);
-            }
-        }
-        
-        for (size_t j = 0; j < ny; ++j) {
-            M_new[0 * ny + j] = M[0 * ny + j];
-            M_new[(local_nx - 1) * ny + j] = M[(local_nx - 1) * ny + j];
-        }
+		for (size_t j = 0; j < ny; ++j) {
+		    M_new[0 * ny + j] = M[0 * ny + j];
+		    M_new[(local_nx - 1) * ny + j] = M[(local_nx - 1) * ny + j];
+		}
 
-        for (size_t i = 0; i < local_nx; ++i) {
-            M_new[i * ny + 0] = M[i * ny + 0];
-            M_new[i * ny + (ny - 1)] = M[i * ny + (ny - 1)];
-        }
+		for (size_t i = 0; i < local_nx; ++i) {
+		    M_new[i * ny + 0] = M[i * ny + 0];
+		    M_new[i * ny + (ny - 1)] = M[i * ny + (ny - 1)];
+		}
 
-        /// Partial computation time
-        comp_end = MPI_Wtime();
-        comp_time += comp_end - comp_start;
-        
-        /// Swap M and M_new for next iteration
-        double* tmp = M;
-        M = M_new;
-        M_new = tmp;
+		/// Partial computation time
+		comp_end = MPI_Wtime();
+		comp_time += comp_end - comp_start;
+		
+		/// Swap M and M_new for next iteration
+		double* tmp = M;
+		M = M_new;
+		M_new = tmp;
+	    }
     }
 
     /// Collect submatrixes in full matrix
@@ -201,8 +210,9 @@ int main(int argc, char* argv[]) {
     double total_time = total_end - total_start;
     
     if (rank == 0) {
-        write_heatmap(M_full, nx, ny);
-        write_results(nx, ny, n_iterations, size, num_threads, total_time, init_time, comm_time, comp_time);
+	int n_nodes = get_num_nodes_from_env();
+        write_heatmap("./one-side-communication/results/heatmap.ppm", M_full, nx, ny);
+        write_results("./one-side-communication/results/timing.txt", nx, ny, n_iterations, n_nodes, size, num_threads, total_time, init_time, comm_time, comp_time);
     }
     
     MPI_Win_free(&win_north);

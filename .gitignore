@@ -1,1 +1,2 @@
-mpi_omp_gpu/heatmap.ppm
+mpi_omp_gpu/one-side-communication/results/heatmap.ppm
+mpi_omp_gpu/two-side-communication/results/heatmap.ppm

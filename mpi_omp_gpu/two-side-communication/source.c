@@ -178,8 +178,9 @@ int main(int argc, char* argv[]) {
     double total_time = total_end - total_start;
     
     if (rank == 0) {
-        write_heatmap(M_full, nx, ny);
-        write_results(nx, ny, n_iterations, size, num_threads, total_time, init_time, comm_time, comp_time);
+	int n_nodes = get_num_nodes_from_env();
+        write_heatmap("two-side-communication/results/heatmap.ppm", M_full, nx, ny);
+        write_results("two-side-communication/results/timing.txt", nx, ny, n_iterations,n_nodes, size, num_threads, total_time, init_time, comm_time, comp_time);
     }
     
     free(M);

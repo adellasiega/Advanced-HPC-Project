@@ -26,10 +26,12 @@ export OMP_PROC_BIND=true
 export N=10000
 export ITERS=1000
 
+# Directories for results
+cd $SLURM_SUBMIT_DIR
+mkdir -p one-side-communication/results
+mkdir -p two-side-communication/results
+
 # Run the program with the specified parameters
+srun --cpu-bind=verbose ./one-side-communication/executable $N $N $ITERS
 srun --cpu-bind=verbose ./two-side-communication/executable $N $N $ITERS
 
-# NOTE:
-# Run this script with the command:
-# sbatch --nodes alpha run.sh
-# where alpha is the number of nodes you want to use.

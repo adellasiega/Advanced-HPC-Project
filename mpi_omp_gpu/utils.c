@@ -35,14 +35,19 @@ double* alloc_init_matrix(size_t nx, size_t ny) {
     return M;
 }
 
-void write_heatmap(double* M, size_t nx, size_t ny) {
+void write_heatmap(const char* filename, double* M, size_t nx, size_t ny) {
     double v_max = 0.0;
     for (size_t i = 1; i < nx; ++i)
         for (size_t j = 1; j < ny; ++j)
             if (M[i * ny + j] > v_max)
                 v_max = M[i * ny + j];
 
-    FILE* out = fopen("heatmap.ppm", "wb");
+    FILE* out = fopen(filename, "wb");
+    if (out == NULL) {
+        fprintf(stderr, "Failed to open %s for writing\n", filename);
+        return;
+    }
+
     fprintf(out, "P6\n%zu %zu\n255\n", ny - 2, nx - 2);
 
     for (size_t i = 1; i < nx - 1; ++i) {
@@ -60,16 +65,41 @@ void write_heatmap(double* M, size_t nx, size_t ny) {
     fclose(out);
 }
 
-void write_results(size_t nx, size_t ny, size_t n_iterations, int size, int num_threads, double total_time, double init_time, double comm_time, double comp_time) {        
-    FILE* log_file = fopen("timing_results.txt", "a");
+void write_results(const char* filename, size_t nx, size_t ny, size_t n_iterations,
+                       int n_nodes, int size, int num_threads, double total_time,
+                       double init_time, double comm_time, double comp_time) {
+    int write_header = 0;
+    FILE* file_check = fopen(filename, "r");
+    if (file_check == NULL) {
+        write_header = 1; // File does not exist, write header
+    } else {
+        fclose(file_check);
+    }
+
+    FILE* log_file = fopen(filename, "a");
     if (log_file == NULL) {
-        fprintf(stderr, "Failed to open timing_results.txt for writing\n");
+        fprintf(stderr, "Failed to open %s for writing\n", filename);
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-    fprintf(log_file, "Run with nx=%zu, ny=%zu, it=%zu, MPI_size=%d, OMP_num_threads=%d\n", nx, ny, n_iterations, size, num_threads);
-    fprintf(log_file, "Total time elapsed: %.6f s\n", total_time);
-    fprintf(log_file, "Total initialization time: %.6f s\n", init_time);
-    fprintf(log_file, "Total communication time: %.6f s\n", comm_time);
-    fprintf(log_file, "Total computing time: %.6f s\n\n", comp_time);
+
+    if (write_header) {
+        fprintf(log_file, "nx,ny,it,num_nodes,MPI_size,OMP_num_threads,total_time,init_time,comm_time,comp_time\n");
+    }
+
+    fprintf(log_file, "%zu,%zu,%zu,%d,%d,%d,%.6f,%.6f,%.6f,%.6f\n",
+            nx, ny, n_iterations, n_nodes, size, num_threads,
+            total_time, init_time, comm_time, comp_time);
+
     fclose(log_file);
+}
+
+
+int get_num_nodes_from_env() {
+    const char* env = getenv("SLURM_NNODES");
+    if (env) {
+        return atoi(env);
+    } else {
+        fprintf(stderr, "SLURM_NNODES not set; are you running under SLURM?\n");
+        return -1;
+    }
 }
