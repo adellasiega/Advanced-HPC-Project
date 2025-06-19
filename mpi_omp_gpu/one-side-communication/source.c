@@ -4,7 +4,6 @@
 #include <mpi.h>
 #include <omp.h>
 #include "../utils.h"
-#include <unistd.h>   // for getcwd()
 
 int main(int argc, char* argv[]) {
     if (argc != 4) {
@@ -127,97 +126,107 @@ int main(int argc, char* argv[]) {
 	    
 	    /// Jacobi algorithm
 	    for (size_t iteration = 0; iteration < n_iterations; ++iteration) {
-		
-		/// Start Communication Time
-		comm_start = MPI_Wtime();
-		
-		#pragma omp target data use_device_ptr(M)
-		{
-			MPI_Win_fence(0, win_north);
-			MPI_Win_fence(0, win_south);
+            
+            /// Syncronize threads
+            #pragma omp barrier
 
-			MPI_Get(
-				M + (local_nx - 1) * ny, ny, MPI_DOUBLE, 
-				proc_south, 0, ny, MPI_DOUBLE, 
-				win_north
-			);
+            /// Start communication time
+            comm_start = MPI_Wtime();
+           
+            /// Communicate boundary rows
+            #pragma omp target data use_device_ptr(M)
+            {
+                MPI_Win_fence(0, win_north);
+                MPI_Win_fence(0, win_south);
 
-			 MPI_Get(
-				M, ny, MPI_DOUBLE, 
-				proc_north, 0, ny, MPI_DOUBLE, 
-				win_south
-			);
+                MPI_Get(
+                    M + (local_nx - 1) * ny, ny, MPI_DOUBLE, 
+                    proc_south, 0, ny, MPI_DOUBLE, 
+                    win_north
+                );
 
-			MPI_Win_fence(0, win_north);
-			MPI_Win_fence(0, win_south);
-		}
+                 MPI_Get(
+                    M, ny, MPI_DOUBLE, 
+                    proc_north, 0, ny, MPI_DOUBLE, 
+                    win_south
+                );
 
-		/// Partial communication time
-		comm_end = MPI_Wtime();
-		comm_time += comm_end - comm_start;
-		
-		/// Computation time
-		comp_start = MPI_Wtime();
+                MPI_Win_fence(0, win_north);
+                MPI_Win_fence(0, win_south);
+            }
 
-		/// Jacobi iteration
-		
-		#pragma omp target teams distribute parallel for simd collapse(2) num_teams(108)  
-		for (size_t i = 1; i < local_nx - 1; ++i) {
-		    for (size_t j = 1; j < ny - 1; ++j) {
-			M_new[i * ny + j] = 
-			    0.25 * (M[(i - 1) * ny + j] +
-				    M[i * ny + j + 1] + 
-				    M[(i + 1) * ny + j] + 
-				    M[i * ny + j - 1]);
-		    }
-		}
+            /// Stop communication time
+            comm_end = MPI_Wtime();
+            comm_time += comm_end - comm_start;
+            
+            /// Syncronize threads
+            #pragma omp barrier
 
-		for (size_t j = 0; j < ny; ++j) {
-		    M_new[0 * ny + j] = M[0 * ny + j];
-		    M_new[(local_nx - 1) * ny + j] = M[(local_nx - 1) * ny + j];
-		}
+            /// Start computation time
+            comp_start = MPI_Wtime();
 
-		for (size_t i = 0; i < local_nx; ++i) {
-		    M_new[i * ny + 0] = M[i * ny + 0];
-		    M_new[i * ny + (ny - 1)] = M[i * ny + (ny - 1)];
-		}
+            /// Jacobi iterations
+            #pragma omp target teams distribute parallel for simd collapse(2) num_teams(108)  
+            for (size_t i = 1; i < local_nx - 1; ++i) {
+                for (size_t j = 1; j < ny - 1; ++j) {
+                    M_new[i * ny + j] = 0.25 * (M[(i - 1) * ny + j] + M[i * ny + j + 1] +
+                            M[(i + 1) * ny + j] + M[i * ny + j - 1]);
+                }
+            }
 
-		/// Partial computation time
-		comp_end = MPI_Wtime();
-		comp_time += comp_end - comp_start;
-		
-		/// Swap M and M_new for next iteration
-		double* tmp = M;
-		M = M_new;
-		M_new = tmp;
-	    }
+            for (size_t j = 0; j < ny; ++j) {
+                M_new[0 * ny + j] = M[0 * ny + j];
+                M_new[(local_nx - 1) * ny + j] = M[(local_nx - 1) * ny + j];
+            }
+
+            for (size_t i = 0; i < local_nx; ++i) {
+                M_new[i * ny + 0] = M[i * ny + 0];
+                M_new[i * ny + (ny - 1)] = M[i * ny + (ny - 1)];
+            }
+
+            /// Syncronize threads
+            #pragma omp barrier
+
+            /// Stop computation time
+            comp_end = MPI_Wtime();
+            comp_time += comp_end - comp_start;
+            
+            /// Swap M and M_new for next iteration
+            double* tmp = M;
+            M = M_new;
+            M_new = tmp;
+        }
     }
 
-    /// Collect submatrixes in full matrix
+    /// Start communication time
     MPI_Barrier(MPI_COMM_WORLD);
     comm_start = MPI_Wtime();
 
+    /// Collect submatrixes in full matrix
     MPI_Gatherv(rank == 0 ? M : M + ny, local_nx_no_bound * ny, MPI_DOUBLE,
                 M_full, sendcounts, displs, MPI_DOUBLE,
                 0, MPI_COMM_WORLD);
-
+    
+    /// Stop communication time
     MPI_Barrier(MPI_COMM_WORLD); 
     comm_end = MPI_Wtime();
     comm_time += comm_end - comm_start;
 
+    /// Stop total time
     MPI_Barrier(MPI_COMM_WORLD);
     total_end = MPI_Wtime();
     double total_time = total_end - total_start;
     
+    /// Write results
     if (rank == 0) {
 	int n_nodes = get_num_nodes_from_env();
         write_heatmap("./one-side-communication/results/heatmap.ppm", M_full, nx, ny);
         write_results("./one-side-communication/results/timing.txt", nx, ny, n_iterations, n_nodes, size, num_threads, total_time, init_time, comm_time, comp_time);
     }
     
+    ///Deallocate resources 
     MPI_Win_free(&win_north);
     MPI_Win_free(&win_south);
-    
     free(M);
     free(M_new);
     if (rank == 0) {
