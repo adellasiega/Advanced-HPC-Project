@@ -99,10 +99,12 @@ int main(int argc, char* argv[]) {
     MPI_Barrier(MPI_COMM_WORLD); 
     init_end = MPI_Wtime();
     double init_time = init_end - init_start;
-    int total_size=local_nx*ny;
     
+    /// Define RMA windows
     MPI_Win win_north;
     MPI_Win win_south;
+    
+    int total_size=local_nx*ny;
     #pragma omp target data map(tofrom: M[0:total_size]) map(to: M_new[0:total_size])
     {
 	    #pragma omp target data use_device_ptr(M)
