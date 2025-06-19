@@ -23,7 +23,7 @@ export OMP_PROC_BIND=true
 
 # Set the size of the matrix and the number of iterations
 export N=10000
-export ITERS=1000
+export ITERS=10000
 
 # Directories for results
 cd $SLURM_SUBMIT_DIR

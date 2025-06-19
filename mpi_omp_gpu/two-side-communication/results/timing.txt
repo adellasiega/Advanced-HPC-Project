@@ -1,6 +1,3 @@
-Run with nx=10000, ny=10000, it=1000, num_nodes=2, MPI_size=8, OMP_num_threads=8
-Total time elapsed: 5.192211 s
-Total initialization time: 0.422734 s
-Total communication time: 2.858038 s
-Total computing time: 1.684589 s
-
+nx,ny,it,num_nodes,MPI_size,OMP_num_threads,total_time,init_time,comm_time,comp_time
+10000,10000,10000,1,4,8,70.075916,0.553565,8.995095,60.254480
+10000,10000,10000,2,8,8,43.244571,0.434930,31.022865,11.555407
