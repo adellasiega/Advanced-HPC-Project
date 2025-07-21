@@ -19,11 +19,10 @@ module load nvhpc/24.3 openmpi/4.1.6--nvhpc--24.3
 # Build the project
 make
 
-# Check if the compilation was successful
 if [ $? -eq 0 ]; then
-    echo "Compilation successful :)"
+    echo "Compilation successful"
 else
-    echo "Compilation failed :("
+    echo "Compilation failed"
     exit 1
 fi
 

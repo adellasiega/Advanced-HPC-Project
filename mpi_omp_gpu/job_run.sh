@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=100GB
-#SBATCH --time=00:05:00
+#SBATCH --time=00:20:00
 
 # Load the required modules
 module load nvhpc/24.3 openmpi/4.1.6--nvhpc--24.3
@@ -23,14 +23,14 @@ export OMP_PROC_BIND=true
 
 # Set the size of the matrix and the number of iterations
 export N=10000
-export ITERS=10000
+export ITERS=500
 
 # Directories for results
 cd $SLURM_SUBMIT_DIR
 mkdir -p one-side-communication/results
 mkdir -p two-side-communication/results
 
-# Run the two versions of th algorithm with the specified parameters
+# Run the desired versions of the algorithm with the specified parameters
 srun --cpu-bind=verbose ./one-side-communication/executable $N $N $ITERS
 srun --cpu-bind=verbose ./two-side-communication/executable $N $N $ITERS
-
+srun --cpu-bind=verbose ./one-side-comm-complete-parall/executable $N $ITERS

@@ -305,7 +305,7 @@ int main(int argc, char* argv[]){
 
   // Save the results to a file
   MPI_File fh;
-  MPI_File_open(MPI_COMM_WORLD, "solution.bin", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+  MPI_File_open(MPI_COMM_WORLD, "one-side-comm-complete-parall/solution.bin", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
   // Handle the distribution of the data across the processes
   if (rank == 0) { // First process
     MPI_Offset fh_offset = 0;
@@ -337,7 +337,7 @@ int main(int argc, char* argv[]){
 
   // Save the times to csv a file
   if (rank == 0) {
-    FILE *fp = fopen("times.csv", "a+");
+    FILE *fp = fopen("one-side-comm-complete-parall/times.csv", "a+");
     if (fp == NULL) {
       fprintf(stderr, "Error opening file\n");
       MPI_Finalize();
