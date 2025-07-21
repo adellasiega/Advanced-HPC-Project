@@ -6,6 +6,7 @@
 #include <sys/time.h>
 #include <mpi.h>
 #include <omp.h>
+#include "../utils.h"
 
 int main(int argc, char* argv[]){
 
@@ -305,7 +306,7 @@ int main(int argc, char* argv[]){
 
   // Save the results to a file
   MPI_File fh;
-  MPI_File_open(MPI_COMM_WORLD, "one-side-comm-complete-parall/solution.bin", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
+  MPI_File_open(MPI_COMM_WORLD, "one-side-comm-complete-parall/results/solution.bin", MPI_MODE_CREATE | MPI_MODE_WRONLY, MPI_INFO_NULL, &fh);
   // Handle the distribution of the data across the processes
   if (rank == 0) { // First process
     MPI_Offset fh_offset = 0;
@@ -337,14 +338,14 @@ int main(int argc, char* argv[]){
 
   // Save the times to csv a file
   if (rank == 0) {
-    FILE *fp = fopen("one-side-comm-complete-parall/times.csv", "a+");
-    if (fp == NULL) {
-      fprintf(stderr, "Error opening file\n");
-      MPI_Finalize();
-      return 1;
+    int num_threads;
+    #pragma omp parallel
+    {
+      #pragma omp single
+      num_threads = omp_get_num_threads();
     }
-    fprintf(fp, "%zu,%zu,%f,%f,%f,%f\n", dimension, iterations, init_time, compute_time, communication_time, copy_time);
-    fclose(fp);
+    int n_nodes = get_num_nodes_from_env();
+    write(results("./one-side-comm-complete_parall/results/timing.txt", dimension, dimension, iterations, n_nodes, size, num_threads, copy_time, init_time, communication_time, computation_time
   }
 
   // Finalize MPI

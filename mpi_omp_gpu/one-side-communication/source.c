@@ -22,7 +22,7 @@ int main(int argc, char* argv[]) {
     double comm_start, comm_end, comm_time = 0.0;
     double comp_start, comp_end, comp_time = 0.0;
 
-    /// Set up multithread MPI
+    /// Set multithread MPI
     int required = MPI_THREAD_FUNNELED;
     int provided; 
     MPI_Init_thread(&argc, &argv, required ,&provided);
@@ -31,12 +31,13 @@ int main(int argc, char* argv[]) {
         printf("MPI does not provide required threading level\n");
         MPI_Abort(MPI_COMM_WORLD, 1);
     }
-
+    
+    /// Get rank and number of MPI processes
     int rank, size;
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
-    /// Get the number of omp threads
+    /// Get the number of OMP threads
     int num_threads;
     #pragma omp parallel
     {
@@ -44,8 +45,13 @@ int main(int argc, char* argv[]) {
         num_threads = omp_get_num_threads();
     }
 
+    /// Get the number of devices
+    const int num_gpus = omp_get_num_devices();
+    const int device_id = rank % num_gpus;
+    omp_set_default_device(device_id);
+
     /// Start total time
-    MPI_Barrier(MPI_COMM_WORLD); 
+    MPI_Barrier(MPI_COMM_WORLD);
     total_start = MPI_Wtime();
     
     /// Start initialization time

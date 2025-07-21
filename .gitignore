@@ -1,3 +1,3 @@
 mpi_omp_gpu/one-side-communication/results/heatmap.ppm
 mpi_omp_gpu/two-side-communication/results/heatmap.ppm
-mpi_omp_gpu/one-side-comm-complete-parall/solution.bin
+mpi_omp_gpu/one-side-comm-complete-parall/results/solution.bin
