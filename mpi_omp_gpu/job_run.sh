@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=jacobi
+#SBATCH --job-name=JacobiIter
 #SBATCH -A ICT25_MHPC_0
 #SBATCH --partition=boost_usr_prod
 #SBATCH --qos=boost_qos_dbg
@@ -8,7 +8,7 @@
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=4
 #SBATCH --mem=100GB
-#SBATCH --time=00:20:00
+#SBATCH --time=00:05:00
 
 # Load the required modules
 module load nvhpc/24.3 openmpi/4.1.6--nvhpc--24.3
@@ -22,15 +22,15 @@ export OMP_PLACES=cores
 export OMP_PROC_BIND=true
 
 # Set the size of the matrix and the number of iterations
-export N=10000
-export ITERS=500
+export NX=516
+export NY=516
+export ITERS=100
 
 # Directories for results
 cd $SLURM_SUBMIT_DIR
 mkdir -p one-side-communication/results
 mkdir -p two-side-communication/results
 
-# Run the desired versions of the algorithm with the specified parameters
-srun --cpu-bind=verbose ./one-side-communication/executable $N $N $ITERS
-srun --cpu-bind=verbose ./two-side-communication/executable $N $N $ITERS
-srun --cpu-bind=verbose ./one-side-comm-complete-parall/executable $N $ITERS
+# Run the executable 
+srun --cpu-bind=verbose ./one-side-communication/executable $NX $NY $ITERS
+srun --cpu-bind=verbose ./two-side-communication/executable $NX $NY $ITERS
