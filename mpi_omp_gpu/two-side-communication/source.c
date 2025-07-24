@@ -107,9 +107,6 @@ int main(int argc, char* argv[]) {
         /// Jacobi algorithm
         for (size_t iteration = 0; iteration < n_iterations; ++iteration) {
             
-            /// Syncronize threads
-            #pragma omp barrier 
-            
             /// Start Communication Time
             comm_start = MPI_Wtime();
             
@@ -125,9 +122,6 @@ int main(int argc, char* argv[]) {
                              MPI_COMM_WORLD, MPI_STATUS_IGNORE);
             }
             
-            /// Syncronize threads
-            #pragma omp barrier
- 
             /// Stop communication time
             comm_end = MPI_Wtime();
             comm_time += comm_end - comm_start;
@@ -154,9 +148,6 @@ int main(int argc, char* argv[]) {
                 M_new[i * ny + (ny - 1)] = M[i * ny + (ny - 1)];
             }
 
-            /// Syncronize threads
-            #pragma omp barrier
-
             /// Stop computation time
             comp_end = MPI_Wtime();
             comp_time += comp_end - comp_start;
@@ -180,7 +171,7 @@ int main(int argc, char* argv[]) {
     /// Stop communication time
     MPI_Barrier(MPI_COMM_WORLD); 
     comm_end = MPI_Wtime();
-    comm_time += comm_end - comm_start;
+    //comm_time += comm_end - comm_start;
 
     /// Stop total time
     MPI_Barrier(MPI_COMM_WORLD);

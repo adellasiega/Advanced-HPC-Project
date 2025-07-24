@@ -3,7 +3,7 @@
 #SBATCH -A ICT25_MHPC_0
 #SBATCH --partition=boost_usr_prod
 #SBATCH --qos=boost_qos_dbg
-#SBATCH --nodes=2
+#SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=8
 #SBATCH --gpus-per-node=4
@@ -24,7 +24,7 @@ export OMP_PROC_BIND=true
 # Set the size of the matrix and the number of iterations
 export NX=516
 export NY=516
-export ITERS=100
+export ITERS=1000
 
 # Directories for results
 cd $SLURM_SUBMIT_DIR
@@ -33,4 +33,4 @@ mkdir -p two-side-communication/results
 
 # Run the executable 
 srun --cpu-bind=verbose ./one-side-communication/executable $NX $NY $ITERS
-srun --cpu-bind=verbose ./two-side-communication/executable $NX $NY $ITERS
+#srun --cpu-bind=verbose ./two-side-communication/executable $NX $NY $ITERS
